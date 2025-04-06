@@ -8,15 +8,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { HistoryItem } from "@/lib/types";
 
 export default function Home() {
-  const [image, setImage] = useState<string | null>(null);
+  const [image1, setImage1] = useState<string | null>(null);
+  const [image2, setImage2] = useState<string | null>(null);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [description, setDescription] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  const handleImageSelect = (imageData: string) => {
-    setImage(imageData || null);
+  const handleImage1Select = (imageData: string) => {
+    setImage1(imageData || null);
+  };
+
+  const handleImage2Select = (imageData: string) => {
+    setImage2(imageData || null);
   };
 
   const handlePromptSubmit = async (prompt: string) => {
@@ -24,8 +29,8 @@ export default function Home() {
       setLoading(true);
       setError(null);
 
-      // If we have a generated image, use that for editing, otherwise use the uploaded image
-      const imageToEdit = generatedImage || image;
+      // If we have a generated image, use that for editing, otherwise use the uploaded images
+      const imageToEdit = generatedImage || (image1 && image2 ? [image1, image2] : null);
 
       // Prepare the request data as JSON
       const requestData = {
@@ -43,11 +48,27 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate image");
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          // If we can't parse the response as JSON, get the text
+          const text = await response.text();
+          errorData = { error: text || `HTTP Error ${response.status}` };
+        }
+        
+        console.error("API Error Response:", {
+          status: response.status,
+          statusText: response.statusText,
+          data: errorData,
+          headers: Object.fromEntries(response.headers.entries())
+        });
+        
+        throw new Error(errorData.error || `Failed to generate image. Status: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log("API Success Response:", data);
 
       if (data.image) {
         // Update the generated image and description
@@ -59,7 +80,7 @@ export default function Home() {
           role: "user",
           parts: [
             { text: prompt },
-            ...(imageToEdit ? [{ image: imageToEdit }] : []),
+            ...(imageToEdit ? (Array.isArray(imageToEdit) ? imageToEdit.map(img => ({ image: img })) : [{ image: imageToEdit }]) : []),
           ],
         };
 
@@ -86,7 +107,8 @@ export default function Home() {
   };
 
   const handleReset = () => {
-    setImage(null);
+    setImage1(null);
+    setImage2(null);
     setGeneratedImage(null);
     setDescription(null);
     setLoading(false);
@@ -95,8 +117,8 @@ export default function Home() {
   };
 
   // If we have a generated image, we want to edit it next time
-  const currentImage = generatedImage || image;
-  const isEditing = !!currentImage;
+  const currentImages = generatedImage ? [generatedImage] : [image1, image2].filter(Boolean);
+  const isEditing = currentImages.length > 0;
 
   // Get the latest image to display (always the generated image)
   const displayImage = generatedImage;
@@ -115,17 +137,40 @@ export default function Home() {
         </CardHeader>
         <CardContent className="space-y-6 pt-6 w-full">
           {error && (
-            <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">
+            <div className={`p-4 mb-4 text-sm rounded-lg ${
+              error.includes("Rate limit exceeded") 
+                ? "bg-yellow-100 text-yellow-700" 
+                : "bg-red-100 text-red-700"
+            }`}>
               {error}
+              {error.includes("Rate limit exceeded") && (
+                <div className="mt-2 text-xs">
+                  <p>This could be due to:</p>
+                  <ul className="list-disc list-inside">
+                    <li>Hitting your daily quota limit</li>
+                    <li>Making too many requests in a short time</li>
+                    <li>Using up your free tier allocation</li>
+                  </ul>
+                  <p className="mt-2">Please try again later or check your API quota in the Google AI Studio.</p>
+                </div>
+              )}
             </div>
           )}
 
           {!displayImage && !loading ? (
             <>
-              <ImageUpload
-                onImageSelect={handleImageSelect}
-                currentImage={currentImage}
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <ImageUpload
+                  onImageSelect={handleImage1Select}
+                  currentImage={image1}
+                  label="First Image"
+                />
+                <ImageUpload
+                  onImageSelect={handleImage2Select}
+                  currentImage={image2}
+                  label="Second Image"
+                />
+              </div>
               <ImagePromptInput
                 onSubmit={handlePromptSubmit}
                 isEditing={isEditing}

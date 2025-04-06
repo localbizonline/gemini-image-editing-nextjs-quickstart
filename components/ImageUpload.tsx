@@ -9,6 +9,7 @@ interface ImageUploadProps {
   onImageSelect: (imageData: string) => void;
   currentImage: string | null;
   onError?: (error: string) => void;
+  label?: string;
 }
 
 export function formatFileSize(bytes: number): string {
@@ -21,7 +22,7 @@ export function formatFileSize(bytes: number): string {
   );
 }
 
-export function ImageUpload({ onImageSelect, currentImage, onError }: ImageUploadProps) {
+export function ImageUpload({ onImageSelect, currentImage, onError, label = "Image" }: ImageUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -81,6 +82,7 @@ export function ImageUpload({ onImageSelect, currentImage, onError }: ImageUploa
 
   return (
     <div className="w-full">
+      <h3 className="text-sm font-medium mb-2">{label}</h3>
       {!currentImage ? (
         <div
           {...getRootProps()}
