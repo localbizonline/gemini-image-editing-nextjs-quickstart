@@ -20,10 +20,12 @@ interface FormattedHistoryItem {
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("Starting image generation request...");
+    
     // Parse JSON request instead of FormData
     const requestData = await req.json();
-    console.log("Received request data:", {
-      prompt: requestData.prompt,
+    console.log("Request data parsed successfully:", {
+      hasPrompt: !!requestData.prompt,
       hasImage: !!requestData.image,
       imageCount: Array.isArray(requestData.image) ? requestData.image.length : requestData.image ? 1 : 0,
       historyLength: requestData.history?.length || 0
@@ -32,6 +34,7 @@ export async function POST(req: NextRequest) {
     const { prompt, image: inputImage, history } = requestData;
 
     if (!prompt) {
+      console.log("Error: No prompt provided");
       return NextResponse.json(
         { error: "Prompt is required" },
         { status: 400 }
@@ -39,6 +42,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!GEMINI_API_KEY) {
+      console.log("Error: No API key configured");
       return NextResponse.json(
         { error: "API key is not configured" },
         { status: 500 }
@@ -48,6 +52,7 @@ export async function POST(req: NextRequest) {
     let response;
 
     try {
+      console.log("Starting to format history...");
       // Convert history to the format expected by Gemini API
       const formattedHistory =
         history && history.length > 0
@@ -81,22 +86,25 @@ export async function POST(req: NextRequest) {
               .filter((item: FormattedHistoryItem) => item.parts.length > 0) // Remove items with no parts
           : [];
 
-      console.log("Formatted history:", JSON.stringify(formattedHistory, null, 2));
+      console.log("History formatted successfully");
 
       // Prepare the current message parts
       const messageParts = [];
 
       // Add the text prompt
       messageParts.push({ text: prompt });
+      console.log("Added text prompt to message parts");
 
       // Add the image(s) if provided
       if (inputImage) {
+        console.log("Processing input images...");
         // Handle both single image and array of images
         const images = Array.isArray(inputImage) ? inputImage : [inputImage];
         
         for (const img of images) {
           // Check if the image is a valid data URL
           if (!img.startsWith("data:")) {
+            console.log("Error: Invalid image data URL format");
             return NextResponse.json(
               { error: "Invalid image data URL format" },
               { status: 400 }
@@ -105,6 +113,7 @@ export async function POST(req: NextRequest) {
 
           const imageParts = img.split(",");
           if (imageParts.length < 2) {
+            console.log("Error: Invalid image data URL format (missing base64 data)");
             return NextResponse.json(
               { error: "Invalid image data URL format" },
               { status: 400 }
@@ -116,7 +125,7 @@ export async function POST(req: NextRequest) {
             ? "image/png"
             : "image/jpeg";
           console.log(
-            "Processing image:",
+            "Image processed successfully:",
             "Base64 length:", base64Image.length,
             "MIME type:", mimeType
           );
@@ -129,10 +138,14 @@ export async function POST(req: NextRequest) {
             },
           });
         }
+        console.log("All images processed successfully");
       }
 
       // Add the message parts to the history
-      formattedHistory.push(messageParts);
+      formattedHistory.push({
+        role: "user",
+        parts: messageParts,
+      });
 
       console.log("Sending request to Gemini API with:", {
         model: MODEL_ID,
@@ -141,6 +154,7 @@ export async function POST(req: NextRequest) {
 
       // Generate the content
       try {
+        console.log("Calling Gemini API...");
         response = await ai.models.generateContent({
           model: MODEL_ID,
           contents: formattedHistory,
@@ -151,6 +165,7 @@ export async function POST(req: NextRequest) {
             responseModalities: ["Text", "Image"],
           },
         });
+        console.log("Gemini API call successful");
       } catch (error: any) {
         console.error("Gemini API Error:", error);
         
@@ -224,6 +239,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!imageData) {
+      console.log("Error: No image data in response");
       return NextResponse.json(
         {
           error: "No image generated",
@@ -234,6 +250,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    console.log("Successfully generated image, returning response");
     // Return just the base64 image and description as JSON
     return NextResponse.json({
       image: `data:${mimeType};base64,${imageData}`,

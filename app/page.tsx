@@ -3,204 +3,238 @@ import { useState } from "react";
 import { ImageUpload } from "@/components/ImageUpload";
 import { ImagePromptInput } from "@/components/ImagePromptInput";
 import { ImageResultDisplay } from "@/components/ImageResultDisplay";
-import { ImageIcon, Wand2 } from "lucide-react";
+import { ImageIcon, Wand2, DollarSign, FileText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { HistoryItem } from "@/lib/types";
+import { ProposalDisplay } from "@/components/ProposalDisplay";
+import { SettingsModal } from "@/components/SettingsModal";
+
+interface ProposalData {
+  title: string;
+  description: string;
+  cost: string;
+  image1: string | null;
+  image2: string | null;
+  generatedImage: string | null;
+}
 
 export default function Home() {
-  const [image1, setImage1] = useState<string | null>(null);
-  const [image2, setImage2] = useState<string | null>(null);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [description, setDescription] = useState<string | null>(null);
+  const [proposalData, setProposalData] = useState<ProposalData>({
+    title: "",
+    description: "",
+    cost: "",
+    image1: null,
+    image2: null,
+    generatedImage: null,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showProposal, setShowProposal] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState(
+    "Create a realistic visualization of how this {title} will look when installed at the client's location. Make it look natural and professional."
+  );
 
   const handleImage1Select = (imageData: string) => {
-    setImage1(imageData || null);
+    setProposalData(prev => ({ ...prev, image1: imageData || null }));
   };
 
   const handleImage2Select = (imageData: string) => {
-    setImage2(imageData || null);
+    setProposalData(prev => ({ ...prev, image2: imageData || null }));
   };
 
-  const handlePromptSubmit = async (prompt: string) => {
+  const handleGenerateImage = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // If we have a generated image, use that for editing, otherwise use the uploaded images
-      const imageToEdit = generatedImage || (image1 && image2 ? [image1, image2] : null);
+      if (!proposalData.image1 || !proposalData.image2) {
+        throw new Error("Please upload both product and client site images");
+      }
 
-      // Prepare the request data as JSON
-      const requestData = {
-        prompt,
-        image: imageToEdit,
-        history: history.length > 0 ? history : undefined,
-      };
+      const prompt = customPrompt.replace("{title}", proposalData.title);
 
+      console.log("Sending request to generate image...");
       const response = await fetch("/api/image", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(requestData),
+        body: JSON.stringify({
+          prompt,
+          image: [proposalData.image1, proposalData.image2],
+          history: [],
+        }),
       });
 
       if (!response.ok) {
-        let errorData;
+        let errorMessage = "Failed to generate image";
         try {
-          errorData = await response.json();
+          const errorData = await response.json();
+          console.error("Error response:", errorData);
+          errorMessage = errorData.error || errorData.details || errorMessage;
         } catch (e) {
-          // If we can't parse the response as JSON, get the text
-          const text = await response.text();
-          errorData = { error: text || `HTTP Error ${response.status}` };
+          console.error("Failed to parse error response:", e);
+          errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
         }
-        
-        console.error("API Error Response:", {
-          status: response.status,
-          statusText: response.statusText,
-          data: errorData,
-          headers: Object.fromEntries(response.headers.entries())
-        });
-        
-        throw new Error(errorData.error || `Failed to generate image. Status: ${response.status}`);
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      console.log("API Success Response:", data);
+      console.log("Received image data:", {
+        hasImage: !!data.image,
+        imageLength: data.image?.length,
+        description: data.description
+      });
 
-      if (data.image) {
-        // Update the generated image and description
-        setGeneratedImage(data.image);
-        setDescription(data.description || null);
-
-        // Update history locally - add user message
-        const userMessage: HistoryItem = {
-          role: "user",
-          parts: [
-            { text: prompt },
-            ...(imageToEdit ? (Array.isArray(imageToEdit) ? imageToEdit.map(img => ({ image: img })) : [{ image: imageToEdit }]) : []),
-          ],
-        };
-
-        // Add AI response
-        const aiResponse: HistoryItem = {
-          role: "model",
-          parts: [
-            ...(data.description ? [{ text: data.description }] : []),
-            ...(data.image ? [{ image: data.image }] : []),
-          ],
-        };
-
-        // Update history with both messages
-        setHistory((prevHistory) => [...prevHistory, userMessage, aiResponse]);
-      } else {
-        setError("No image returned from API");
+      if (!data.image) {
+        throw new Error("No image data received from API");
       }
+
+      setProposalData(prev => {
+        console.log("Setting generated image in state");
+        return { ...prev, generatedImage: data.image };
+      });
     } catch (error) {
+      console.error("Error in handleGenerateImage:", error);
       setError(error instanceof Error ? error.message : "An error occurred");
-      console.error("Error processing request:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleReset = () => {
-    setImage1(null);
-    setImage2(null);
-    setGeneratedImage(null);
-    setDescription(null);
-    setLoading(false);
-    setError(null);
-    setHistory([]);
+  const handleInputChange = (field: keyof ProposalData, value: string) => {
+    setProposalData(prev => ({ ...prev, [field]: value }));
   };
 
-  // If we have a generated image, we want to edit it next time
-  const currentImages = generatedImage ? [generatedImage] : [image1, image2].filter(Boolean);
-  const isEditing = currentImages.length > 0;
-
-  // Get the latest image to display (always the generated image)
-  const displayImage = generatedImage;
+  const handleReset = () => {
+    setProposalData({
+      title: "",
+      description: "",
+      cost: "",
+      image1: null,
+      image2: null,
+      generatedImage: null,
+    });
+    setShowProposal(false);
+  };
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-background p-8">
       <Card className="w-full max-w-4xl border-0 bg-card shadow-none">
         <CardHeader className="flex flex-col items-center justify-center space-y-2">
-          <CardTitle className="flex items-center gap-2 text-foreground">
-            <Wand2 className="w-8 h-8 text-primary" />
-            Image Creation & Editing
-          </CardTitle>
+          <div className="flex items-center justify-between w-full">
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <FileText className="w-8 h-8 text-primary" />
+              Contractor Proposal Generator
+            </CardTitle>
+            <SettingsModal prompt={customPrompt} onPromptChange={setCustomPrompt} />
+          </div>
           <span className="text-sm font-mono text-muted-foreground">
-            powered by Google DeepMind Gemini 2.0 Flash
+            Create professional proposals with visualizations
           </span>
         </CardHeader>
         <CardContent className="space-y-6 pt-6 w-full">
           {error && (
-            <div className={`p-4 mb-4 text-sm rounded-lg ${
-              error.includes("Rate limit exceeded") 
-                ? "bg-yellow-100 text-yellow-700" 
-                : "bg-red-100 text-red-700"
-            }`}>
+            <div className="p-4 mb-4 text-sm rounded-lg bg-red-100 text-red-700">
               {error}
-              {error.includes("Rate limit exceeded") && (
-                <div className="mt-2 text-xs">
-                  <p>This could be due to:</p>
-                  <ul className="list-disc list-inside">
-                    <li>Hitting your daily quota limit</li>
-                    <li>Making too many requests in a short time</li>
-                    <li>Using up your free tier allocation</li>
-                  </ul>
-                  <p className="mt-2">Please try again later or check your API quota in the Google AI Studio.</p>
-                </div>
-              )}
             </div>
           )}
 
-          {!displayImage && !loading ? (
-            <>
+          {!showProposal ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Project Title</label>
+                  <Input
+                    value={proposalData.title}
+                    onChange={(e) => handleInputChange("title", e.target.value)}
+                    placeholder="e.g., Custom Pool Installation"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Project Description</label>
+                  <Textarea
+                    value={proposalData.description}
+                    onChange={(e) => handleInputChange("description", e.target.value)}
+                    placeholder="Describe the project details..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Estimated Cost</label>
+                  <Input
+                    value={proposalData.cost}
+                    onChange={(e) => handleInputChange("cost", e.target.value)}
+                    placeholder="e.g., $25,000"
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ImageUpload
                   onImageSelect={handleImage1Select}
-                  currentImage={image1}
-                  label="First Image"
+                  currentImage={proposalData.image1}
+                  label="Product Image"
                 />
                 <ImageUpload
                   onImageSelect={handleImage2Select}
-                  currentImage={image2}
-                  label="Second Image"
+                  currentImage={proposalData.image2}
+                  label="Client Site Image"
                 />
               </div>
-              <ImagePromptInput
-                onSubmit={handlePromptSubmit}
-                isEditing={isEditing}
-                isLoading={loading}
-              />
-            </>
-          ) : loading ? (
-            <div
-              role="status"
-              className="flex items-center mx-auto justify-center h-56 max-w-sm bg-gray-300 rounded-lg animate-pulse dark:bg-secondary"
-            >
-              <ImageIcon className="w-10 h-10 text-gray-200 dark:text-muted-foreground" />
-              <span className="pl-4 font-mono font-xs text-muted-foreground">
-                Processing...
-              </span>
+
+              {proposalData.generatedImage && (
+                <div className="mt-6 p-4 bg-white rounded-lg shadow">
+                  <h3 className="text-lg font-semibold mb-4">Generated Visualization</h3>
+                  <div className="relative aspect-video w-full overflow-hidden rounded-lg">
+                    <img
+                      src={proposalData.generatedImage}
+                      alt="Generated visualization"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => setProposalData(prev => ({ ...prev, generatedImage: null }))}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-4">
+                <Button
+                  variant="outline"
+                  onClick={handleReset}
+                >
+                  Reset
+                </Button>
+                <Button
+                  onClick={handleGenerateImage}
+                  disabled={loading || !proposalData.image1 || !proposalData.image2}
+                >
+                  {loading ? "Generating..." : "Generate Visualization"}
+                </Button>
+                <Button
+                  onClick={() => setShowProposal(true)}
+                  disabled={!proposalData.generatedImage || !proposalData.title || !proposalData.description || !proposalData.cost}
+                >
+                  View Proposal
+                </Button>
+              </div>
             </div>
           ) : (
-            <>
-              <ImageResultDisplay
-                imageUrl={displayImage || ""}
-                description={description}
-                onReset={handleReset}
-                conversationHistory={history}
-              />
-              <ImagePromptInput
-                onSubmit={handlePromptSubmit}
-                isEditing={true}
-                isLoading={loading}
-              />
-            </>
+            <ProposalDisplay
+              title={proposalData.title}
+              description={proposalData.description}
+              cost={proposalData.cost}
+              imageUrl={proposalData.generatedImage || ""}
+              onEdit={() => setShowProposal(false)}
+            />
           )}
         </CardContent>
       </Card>
