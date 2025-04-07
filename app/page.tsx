@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { HistoryItem } from "@/lib/types";
 import { ProposalDisplay } from "@/components/ProposalDisplay";
 import { SettingsModal } from "@/components/SettingsModal";
+import { sendWebhookRequest } from './lib/webhookSender';
 
 interface ProposalData {
   title: string;
@@ -56,51 +57,36 @@ export default function Home() {
 
       const prompt = customPrompt.replace("{title}", proposalData.title);
 
-      console.log("Sending request to generate image...");
-      const response = await fetch("/api/image", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      interface WebhookRequest {
+        prompt: string;
+        images: string[];
+      }
+
+      interface WebhookResponse {
+        image: string;
+        description?: string;
+      }
+
+      await sendWebhookRequest<WebhookRequest, WebhookResponse>({
+        url: 'https://n8n.localpros.co.za/webhook/generate-image',
+        data: {
           prompt,
-          image: [proposalData.image1, proposalData.image2],
-          history: [],
-        }),
-      });
-
-      if (!response.ok) {
-        let errorMessage = "Failed to generate image";
-        try {
-          const errorData = await response.json();
-          console.error("Error response:", errorData);
-          errorMessage = errorData.error || errorData.details || errorMessage;
-        } catch (e) {
-          console.error("Failed to parse error response:", e);
-          errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      console.log("Received image data:", {
-        hasImage: !!data.image,
-        imageLength: data.image?.length,
-        description: data.description
-      });
-
-      if (!data.image) {
-        throw new Error("No image data received from API");
-      }
-
-      setProposalData(prev => {
-        console.log("Setting generated image in state");
-        return { ...prev, generatedImage: data.image };
+          images: [proposalData.image1, proposalData.image2]
+        },
+        onSuccess: (data) => {
+          if (!data.image) {
+            throw new Error("No image data received from API");
+          }
+          setProposalData(prev => ({ ...prev, generatedImage: data.image }));
+        },
+        onError: (error) => {
+          setError(error);
+        },
+        setIsLoading: setLoading
       });
     } catch (error) {
       console.error("Error in handleGenerateImage:", error);
       setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
       setLoading(false);
     }
   };
